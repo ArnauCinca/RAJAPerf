@@ -23,6 +23,12 @@ namespace apps
 {
 
 
+  const size_t threads_per_team = 256;
+  // Match the factorized CUDA layout: moments (x), groups (y), zones (z).
+  const size_t threads_per_team_x = 32;
+  const size_t threads_per_team_y = integer::greater_of_squarest_factor_pair(threads_per_team / threads_per_team_x);
+  const size_t threads_per_team_z = integer::lesser_of_squarest_factor_pair(threads_per_team / threads_per_team_x);
+
 void LTIMES_NOVIEW::runOpenMPTargetVariant(VariantID vid)
 {
   const Index_type run_reps = getRunReps();
@@ -36,8 +42,43 @@ void LTIMES_NOVIEW::runOpenMPTargetVariant(VariantID vid)
     for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
 
       RP_CALI_SUBKERNEL_BEGIN("LTIMES_NOVIEW_1");
+      //#pragma omp target is_device_ptr(phidat, elldat, psidat) device( did )
+      //#pragma omp teams distribute parallel for schedule(static, 1) collapse(3)
+      const size_t grid_size_x = RAJA_DIVIDE_CEILING_INT(num_m, threads_per_team_x);
+      const size_t grid_size_y = RAJA_DIVIDE_CEILING_INT(num_g, threads_per_team_y);
+      const size_t grid_size_z = RAJA_DIVIDE_CEILING_INT(num_z, threads_per_team_z);
+      #pragma omp target teams num_teams(dims(3): grid_size_x, grid_size_y, grid_size_z) \
+              thread_limit(dims(3): threads_per_team_x, threads_per_team_y, threads_per_team_z) \
+              is_device_ptr(phidat, elldat, psidat) device( did )
+      #pragma omp parallel
+      {
+        Index_type m = omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        Index_type g = omp_get_team_num_dim(1) * omp_get_num_threads_dim(1) + omp_get_thread_num_dim(1);
+        Index_type z = omp_get_team_num_dim(2) * omp_get_num_threads_dim(2) + omp_get_thread_num_dim(2);
+        if (m < num_m && g < num_g && z < num_z) {
+          for (Index_type d = 0; d < num_d; ++d ) {
+            LTIMES_NOVIEW_BODY;
+          }
+        }
+      }
+      RP_CALI_SUBKERNEL_END("LTIMES_NOVIEW_1");
+
+    }
+    stopTimer();
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    const size_t grid_size =
+        RAJA_DIVIDE_CEILING_INT(static_cast<size_t>(num_z) * num_g * num_m, threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      RP_CALI_SUBKERNEL_BEGIN("LTIMES_NOVIEW_1");
       #pragma omp target is_device_ptr(phidat, elldat, psidat) device( did )
-      #pragma omp teams distribute parallel for schedule(static, 1) collapse(3)
+      #pragma omp teams distribute parallel for num_teams(grid_size) \
+              thread_limit(threads_per_team) schedule(static, 1) collapse(3)
       for (Index_type z = 0; z < num_z; ++z ) {
         for (Index_type g = 0; g < num_g; ++g ) {
           for (Index_type m = 0; m < num_m; ++m ) {
@@ -93,7 +134,7 @@ void LTIMES_NOVIEW::runOpenMPTargetVariant(VariantID vid)
 void LTIMES_NOVIEW::defineOpenMPTargetVariantTunings()
 {
 
-  for (VariantID vid : {Base_OpenMPTarget, RAJA_OpenMPTarget}) {
+  for (VariantID vid : {Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget}) {
 
     if (vid == RAJA_OpenMPTarget) {
 

@@ -52,9 +52,66 @@ void REDUCE_STRUCT::runOpenMPTargetVariant(VariantID vid)
         Real_type xmin = m_init_min; Real_type ymin = m_init_min;
         Real_type xmax = m_init_max; Real_type ymax = m_init_max;
 
+        //#pragma omp target is_device_ptr(xa, ya) device( did ) \
+        //                   map(tofrom:xsum, xmin, xmax, ysum, ymin, ymax)
+        //#pragma omp teams distribute parallel for \
+        //                  thread_limit(threads_per_team) schedule(static,1) \
+        //                       reduction(+:xsum) \
+        //                       reduction(min:xmin) \
+        //                       reduction(max:xmax), \
+        //                       reduction(+:ysum), \
+        //                       reduction(min:ymin), \
+        //                       reduction(max:ymax)
+        const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+        #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+                thread_limit(dims(3): threads_per_team, 1, 1) \
+                reduction(+:xsum) reduction(min:xmin) reduction(max:xmax) reduction(+:ysum) reduction(min:ymin) reduction(max:ymax) is_device_ptr(xa, ya) device( did ) map(tofrom:xsum, xmin, xmax, ysum, ymin, ymax)
+        #pragma omp parallel reduction(+:xsum) reduction(min:xmin) reduction(max:xmax) reduction(+:ysum) reduction(min:ymin) reduction(max:ymax)
+        {
+          Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+          if (i < iend) {
+            xsum += xa[i] ;
+            xmin = RAJA_MIN(xmin, xa[i]) ;
+            xmax = RAJA_MAX(xmax, xa[i]) ;
+            ysum += ya[i] ;
+            ymin = RAJA_MIN(ymin, ya[i]) ;
+            ymax = RAJA_MAX(ymax, ya[i]) ;
+          }
+        }
+
+        points.SetCenter(xsum/points.N, ysum/points.N);
+        points.SetXMin(xmin);
+        points.SetXMax(xmax);
+        points.SetYMin(ymin); 
+        points.SetYMax(ymax);
+        m_points = points;
+        RP_CALI_SUBKERNEL_END("REDUCE_STRUCT_1");
+
+      }
+      stopTimer();
+
+      break;
+    }
+
+    case Base_OpenMPTarget_ParallelFor : {
+
+      Real_ptr xa = x;
+      Real_ptr ya = y;
+
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+
+      startTimer();
+      // Loop counter increment uses macro to quiet C++20 compiler warning
+      for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+        RP_CALI_SUBKERNEL_BEGIN("REDUCE_STRUCT_1");
+        Real_type xsum = m_init_sum; Real_type ysum = m_init_sum;
+        Real_type xmin = m_init_min; Real_type ymin = m_init_min;
+        Real_type xmax = m_init_max; Real_type ymax = m_init_max;
+
         #pragma omp target is_device_ptr(xa, ya) device( did ) \
                            map(tofrom:xsum, xmin, xmax, ysum, ymin, ymax)
-        #pragma omp teams distribute parallel for \
+        #pragma omp teams distribute parallel for num_teams(grid_size) \
                           thread_limit(threads_per_team) schedule(static,1) \
                                reduction(+:xsum) \
                                reduction(min:xmin) \
@@ -74,7 +131,7 @@ void REDUCE_STRUCT::runOpenMPTargetVariant(VariantID vid)
         points.SetCenter(xsum/points.N, ysum/points.N);
         points.SetXMin(xmin);
         points.SetXMax(xmax);
-        points.SetYMin(ymin); 
+        points.SetYMin(ymin);
         points.SetYMax(ymax);
         m_points = points;
         RP_CALI_SUBKERNEL_END("REDUCE_STRUCT_1");
@@ -141,7 +198,7 @@ void REDUCE_STRUCT::runOpenMPTargetVariant(VariantID vid)
 
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(REDUCE_STRUCT, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(REDUCE_STRUCT, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace basic
 } // end namespace rajaperf

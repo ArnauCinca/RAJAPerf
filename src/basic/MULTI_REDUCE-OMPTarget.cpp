@@ -43,12 +43,48 @@ void MULTI_REDUCE::runOpenMPTargetVariant(VariantID vid)
     startTimer();
     // Loop counter increment uses macro to quiet C++20 compiler warning
     for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+      //const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend, threads_per_team);
+
+      RP_CALI_SUBKERNEL_BEGIN("MULTI_REDUCE_1");
+      initOpenMPDeviceData(values, values_init, num_bins);
+
+      //#pragma omp target is_device_ptr(values, bins, data)
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) num_teams(grid_size)
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(values, bins, data)
+      #pragma omp parallel
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          MULTI_REDUCE_BODY(RAJAPERF_ATOMIC_ADD_OMP);
+        }
+      }
+
+      getOpenMPDeviceData(values_final, values, num_bins);
+      RP_CALI_SUBKERNEL_END("MULTI_REDUCE_1");
+
+    }
+    stopTimer();
+
+    MULTI_REDUCE_TEARDOWN_VALUES;
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    MULTI_REDUCE_SETUP_VALUES;
+
+    const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
 
       RP_CALI_SUBKERNEL_BEGIN("MULTI_REDUCE_1");
       initOpenMPDeviceData(values, values_init, num_bins);
 
       #pragma omp target is_device_ptr(values, bins, data)
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = ibegin; i < iend; ++i ) {
         MULTI_REDUCE_BODY(RAJAPERF_ATOMIC_ADD_OMP);
       }
@@ -69,7 +105,7 @@ void MULTI_REDUCE::runOpenMPTargetVariant(VariantID vid)
 
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(MULTI_REDUCE, OpenMPTarget, Base_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(MULTI_REDUCE, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor)
 
 } // end namespace basic
 } // end namespace rajaperf

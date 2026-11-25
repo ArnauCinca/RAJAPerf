@@ -49,7 +49,40 @@ void TRAP_INT::runOpenMPTargetVariant(VariantID vid)
       RP_CALI_SUBKERNEL_BEGIN("TRAP_INT_1");
       Real_type sumx = m_sumx_init;
 
-      #pragma omp target teams distribute parallel for \
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              map(tofrom: sumx) reduction(+:sumx)
+      #pragma omp parallel reduction(+:sumx)
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          TRAP_INT_BODY;
+        }
+      }
+
+      m_sumx += sumx * h;
+      RP_CALI_SUBKERNEL_END("TRAP_INT_1");
+
+    }
+    stopTimer();
+
+    #pragma omp target exit data map(delete: x0,xp,y,yp,h)
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    #pragma omp target enter data map(to:x0,xp,y,yp,h)
+
+    const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      RP_CALI_SUBKERNEL_BEGIN("TRAP_INT_1");
+      Real_type sumx = m_sumx_init;
+
+      #pragma omp target teams distribute parallel for num_teams(grid_size) \
                          map(tofrom: sumx) reduction(+:sumx) \
                          thread_limit(threads_per_team) schedule(static, 1)
 
@@ -96,7 +129,7 @@ void TRAP_INT::runOpenMPTargetVariant(VariantID vid)
   }
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(TRAP_INT, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(TRAP_INT, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace basic
 } // end namespace rajaperf

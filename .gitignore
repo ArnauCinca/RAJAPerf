@@ -5,10 +5,13 @@
 *.o
 *.a
 *.exe
+*.csv
 *.gch
 /*.sublime-*
 /build/
 /build_*/
+/amd/build_*/
+/nvidia/build_*/
 /build-*/
 /install/
 /install_*/

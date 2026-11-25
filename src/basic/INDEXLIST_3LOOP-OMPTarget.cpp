@@ -52,8 +52,77 @@ void INDEXLIST_3LOOP::runOpenMPTargetVariant(VariantID vid)
         RP_CALI_SUBKERNEL_BEGIN("INDEXLIST_3LOOP_1");
         #pragma omp parallel for
 
+        //#pragma omp target is_device_ptr(counts, x) device( did )
+        //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+        const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+        #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+                thread_limit(dims(3): threads_per_team, 1, 1) \
+                is_device_ptr(counts, x) device( did )
+        #pragma omp parallel
+        {
+          Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+          if (i < iend) {
+            counts[i] = (INDEXLIST_3LOOP_CONDITIONAL) ? 1 : 0;
+          }
+        }
+        RP_CALI_SUBKERNEL_END("INDEXLIST_3LOOP_1");
+
+        Index_type count = 0;
+        //#pragma omp target is_device_ptr(counts) device( did )
+        //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) \
+        //                                          reduction(inscan, +:count)
+        // OpenMP scan requires an associated worksharing loop.
+        #pragma omp target teams distribute parallel for thread_limit(threads_per_team) \
+                                                  reduction(inscan, +:count) \
+                                                  is_device_ptr(counts) device( did )
+        for (Index_type i = ibegin; i < iend+1; ++i ) {
+          Index_type inc = counts[i];
+          counts[i] = count;
+          #pragma omp scan exclusive(count)
+          count += inc;
+        }
+
+        RP_CALI_SUBKERNEL_BEGIN("INDEXLIST_3LOOP_2");
+        //#pragma omp target is_device_ptr(counts, list) device( did )
+        //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+        const size_t grid_size2 = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+        #pragma omp target teams num_teams(dims(3): grid_size2, 1, 1) \
+                thread_limit(dims(3): threads_per_team, 1, 1) \
+                is_device_ptr(counts, list) device( did )
+        #pragma omp parallel
+        {
+          Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+          if (i < iend) {
+            INDEXLIST_3LOOP_MAKE_LIST;
+          }
+        }
+        RP_CALI_SUBKERNEL_END("INDEXLIST_3LOOP_2");
+
+        m_len = counts[iend];
+
+      }
+      stopTimer();
+
+      INDEXLIST_3LOOP_COUNTS_TEARDOWN(DataSpace::OmpTarget);
+
+      break;
+    }
+
+    case Base_OpenMPTarget_ParallelFor : {
+
+      INDEXLIST_3LOOP_COUNTS_SETUP(DataSpace::OmpTarget);
+
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      const size_t grid_size2 = RAJA_DIVIDE_CEILING_INT(iend - ibegin + 1, threads_per_team);
+
+      startTimer();
+      // Loop counter increment uses macro to quiet C++20 compiler warning
+      for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+        RP_CALI_SUBKERNEL_BEGIN("INDEXLIST_3LOOP_1");
         #pragma omp target is_device_ptr(counts, x) device( did )
-        #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+        #pragma omp teams distribute parallel for num_teams(grid_size) \
+                thread_limit(threads_per_team) schedule(static, 1)
         for (Index_type i = ibegin; i < iend; ++i ) {
           counts[i] = (INDEXLIST_3LOOP_CONDITIONAL) ? 1 : 0;
         }
@@ -61,7 +130,7 @@ void INDEXLIST_3LOOP::runOpenMPTargetVariant(VariantID vid)
 
         Index_type count = 0;
         #pragma omp target is_device_ptr(counts) device( did )
-        #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) \
+        #pragma omp teams distribute parallel for num_teams(grid_size2) thread_limit(threads_per_team) \
                                                   reduction(inscan, +:count)
         for (Index_type i = ibegin; i < iend+1; ++i ) {
           Index_type inc = counts[i];
@@ -72,7 +141,8 @@ void INDEXLIST_3LOOP::runOpenMPTargetVariant(VariantID vid)
 
         RP_CALI_SUBKERNEL_BEGIN("INDEXLIST_3LOOP_2");
         #pragma omp target is_device_ptr(counts, list) device( did )
-        #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+        #pragma omp teams distribute parallel for num_teams(grid_size) \
+                thread_limit(threads_per_team) schedule(static, 1)
         for (Index_type i = ibegin; i < iend; ++i ) {
           INDEXLIST_3LOOP_MAKE_LIST;
         }
@@ -101,7 +171,7 @@ void INDEXLIST_3LOOP::runOpenMPTargetVariant(VariantID vid)
 
 #if defined(RAJA_ENABLE_OPENMP) && defined(RUN_OPENMP) \
  && _OPENMP >= 201811 && defined(RAJA_PERFSUITE_ENABLE_OPENMP5_SCAN)
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(INDEXLIST_3LOOP, OpenMPTarget, Base_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(INDEXLIST_3LOOP, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor)
 #else
 void INDEXLIST_3LOOP::defineOpenMPTargetVariantTunings() {}
 #endif

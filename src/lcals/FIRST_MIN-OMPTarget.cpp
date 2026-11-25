@@ -49,8 +49,45 @@ void FIRST_MIN::runOpenMPTargetVariant(VariantID vid)
 
       FIRST_MIN_MINLOC_INIT;
 
+      //#pragma omp target is_device_ptr(x) device( did ) map(tofrom:mymin)
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) \
+      //            reduction(minloc:mymin)
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              reduction(minloc:mymin) is_device_ptr(x) device( did ) map(tofrom:mymin)
+      #pragma omp parallel reduction(minloc:mymin)
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          FIRST_MIN_BODY;
+        }
+      }
+
+      m_minloc = mymin.loc;
+      RP_CALI_SUBKERNEL_END("FIRST_MIN_1");
+
+    }
+    stopTimer();
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      RP_CALI_SUBKERNEL_BEGIN("FIRST_MIN_1");
+      #pragma omp declare reduction(minloc : MyMinLoc : \
+                                    omp_out = MinLoc_compare(omp_out, omp_in))\
+                                    initializer (omp_priv = omp_orig)
+
+      FIRST_MIN_MINLOC_INIT;
+
       #pragma omp target is_device_ptr(x) device( did ) map(tofrom:mymin)
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) \
+      #pragma omp teams distribute parallel for num_teams(grid_size) \
+              thread_limit(threads_per_team) schedule(static, 1) \
                   reduction(minloc:mymin)
       for (Index_type i = ibegin; i < iend; ++i ) {
         FIRST_MIN_BODY;
@@ -96,7 +133,7 @@ void FIRST_MIN::runOpenMPTargetVariant(VariantID vid)
 
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(FIRST_MIN, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(FIRST_MIN, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace lcals
 } // end namespace rajaperf

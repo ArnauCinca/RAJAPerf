@@ -34,7 +34,8 @@ void HALO_SENDRECV::runOpenMPTargetVariant(VariantID vid)
 
   HALO_SENDRECV_DATA_SETUP;
 
-  if ( vid == Base_OpenMPTarget ) {
+  // This benchmark only communicates; both target variants use MPI.
+  if ( vid == Base_OpenMPTarget || vid == Base_OpenMPTarget_ParallelFor ) {
 
     startTimer();
     // Loop counter increment uses macro to quiet C++20 compiler warning
@@ -66,7 +67,7 @@ void HALO_SENDRECV::runOpenMPTargetVariant(VariantID vid)
   }
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(HALO_SENDRECV, OpenMPTarget, Base_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(HALO_SENDRECV, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor)
 
 } // end namespace comm
 } // end namespace rajaperf

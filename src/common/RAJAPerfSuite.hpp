@@ -246,7 +246,8 @@ enum VariantID {
   Lambda_OpenMP,
   RAJA_OpenMP,
 
-  Base_OpenMPTarget,
+  Base_OpenMPTarget,             // Experimental multidimensional teams/threads.
+  Base_OpenMPTarget_ParallelFor, // Classic teams distribute parallel for.
   RAJA_OpenMPTarget,
 
   Base_CUDA,

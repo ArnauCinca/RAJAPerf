@@ -36,7 +36,8 @@
   Real_ptr in = m_in; \
   Real_ptr out = m_out; \
 \
-  const Index_type coefflen = m_coefflen;
+  Index_type coefflen = m_coefflen;
+  //const Index_type coefflen = m_coefflen;
 
 #define FIR_COEFF \
   Real_type coeff_array[FIR_COEFFLEN] = { 3.0, -1.0, -1.0, -1.0, \
@@ -46,7 +47,7 @@
 
 #define FIR_BODY \
   Real_type sum = 0.0; \
-\
+  \
   for (Index_type j = 0; j < coefflen; ++j ) { \
     sum += coeff[j]*in[i+j]; \
   } \

@@ -43,9 +43,124 @@ void ENERGY::runOpenMPTargetVariant(VariantID vid)
     for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
 
       RP_CALI_SUBKERNEL_BEGIN("ENERGY_1");
+      //#pragma omp target is_device_ptr(e_new, e_old, delvc, \
+      //                                 p_old, q_old, work) device( did )
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(e_new, e_old, delvc, p_old, q_old, work) device( did )
+      #pragma omp parallel
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          ENERGY_BODY1;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("ENERGY_1");
+
+      RP_CALI_SUBKERNEL_BEGIN("ENERGY_2");
+      //#pragma omp target is_device_ptr(delvc, q_new, compHalfStep, \
+      //                                 pHalfStep, e_new, bvc, pbvc, \
+      //                                 ql_old, qq_old) device( did )
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size2 = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size2, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(delvc, q_new, compHalfStep, pHalfStep, e_new, bvc, pbvc, ql_old, qq_old) device( did )
+      #pragma omp parallel
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          ENERGY_BODY2;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("ENERGY_2");
+
+      RP_CALI_SUBKERNEL_BEGIN("ENERGY_3");
+      //#pragma omp target is_device_ptr(e_new, delvc, p_old, \
+      //                                 q_old, pHalfStep, q_new) device( did )
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size3 = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size3, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(e_new, delvc, p_old, q_old, pHalfStep, q_new) device( did )
+      #pragma omp parallel
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          ENERGY_BODY3;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("ENERGY_3");
+
+      RP_CALI_SUBKERNEL_BEGIN("ENERGY_4");
+      //#pragma omp target is_device_ptr(e_new, work) device( did )
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size4 = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size4, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(e_new, work) device( did )
+      #pragma omp parallel
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          ENERGY_BODY4;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("ENERGY_4");
+
+      RP_CALI_SUBKERNEL_BEGIN("ENERGY_5");
+      //#pragma omp target is_device_ptr(delvc, pbvc, e_new, vnewc, \
+      //                                 bvc, p_new, ql_old, qq_old, \
+      //                                 p_old, q_old, pHalfStep, q_new) device( did )
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size5 = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size5, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(delvc, pbvc, e_new, vnewc, bvc, p_new, ql_old, qq_old, p_old, q_old, pHalfStep, q_new) device( did )
+      #pragma omp parallel
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          ENERGY_BODY5;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("ENERGY_5");
+
+      RP_CALI_SUBKERNEL_BEGIN("ENERGY_6");
+      //#pragma omp target is_device_ptr(delvc, pbvc, e_new, vnewc, \
+      //                                 bvc, p_new, q_new, ql_old, qq_old) \
+      //                                 device( did )
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size6 = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size6, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(delvc, pbvc, e_new, vnewc, bvc, p_new, q_new, ql_old, qq_old) device( did )
+      #pragma omp parallel
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          ENERGY_BODY6;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("ENERGY_6");
+
+    }
+    stopTimer();
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      RP_CALI_SUBKERNEL_BEGIN("ENERGY_1");
       #pragma omp target is_device_ptr(e_new, e_old, delvc, \
                                        p_old, q_old, work) device( did )
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = ibegin; i < iend; ++i ) {
         ENERGY_BODY1;
       }
@@ -55,7 +170,7 @@ void ENERGY::runOpenMPTargetVariant(VariantID vid)
       #pragma omp target is_device_ptr(delvc, q_new, compHalfStep, \
                                        pHalfStep, e_new, bvc, pbvc, \
                                        ql_old, qq_old) device( did )
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = ibegin; i < iend; ++i ) {
         ENERGY_BODY2;
       }
@@ -64,7 +179,7 @@ void ENERGY::runOpenMPTargetVariant(VariantID vid)
       RP_CALI_SUBKERNEL_BEGIN("ENERGY_3");
       #pragma omp target is_device_ptr(e_new, delvc, p_old, \
                                        q_old, pHalfStep, q_new) device( did )
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = ibegin; i < iend; ++i ) {
         ENERGY_BODY3;
       }
@@ -72,7 +187,7 @@ void ENERGY::runOpenMPTargetVariant(VariantID vid)
 
       RP_CALI_SUBKERNEL_BEGIN("ENERGY_4");
       #pragma omp target is_device_ptr(e_new, work) device( did )
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = ibegin; i < iend; ++i ) {
         ENERGY_BODY4;
       }
@@ -82,7 +197,7 @@ void ENERGY::runOpenMPTargetVariant(VariantID vid)
       #pragma omp target is_device_ptr(delvc, pbvc, e_new, vnewc, \
                                        bvc, p_new, ql_old, qq_old, \
                                        p_old, q_old, pHalfStep, q_new) device( did )
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = ibegin; i < iend; ++i ) {
         ENERGY_BODY5;
       }
@@ -92,7 +207,7 @@ void ENERGY::runOpenMPTargetVariant(VariantID vid)
       #pragma omp target is_device_ptr(delvc, pbvc, e_new, vnewc, \
                                        bvc, p_new, q_new, ql_old, qq_old) \
                                        device( did )
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = ibegin; i < iend; ++i ) {
         ENERGY_BODY6;
       }
@@ -163,7 +278,7 @@ void ENERGY::runOpenMPTargetVariant(VariantID vid)
   }
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(ENERGY, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(ENERGY, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace apps
 } // end namespace rajaperf

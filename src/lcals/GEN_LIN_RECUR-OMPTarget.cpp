@@ -41,8 +41,51 @@ void GEN_LIN_RECUR::runOpenMPTargetVariant(VariantID vid)
     for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
 
       RP_CALI_SUBKERNEL_BEGIN("GEN_LIN_RECUR_1");
+      //#pragma omp target is_device_ptr(b5, stb5, sa, sb) device( did )
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(N, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(b5, stb5, sa, sb) device( did )
+      #pragma omp parallel
+      {
+        Index_type k = omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (k < N) {
+          GEN_LIN_RECUR_BODY1;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("GEN_LIN_RECUR_1");
+
+      RP_CALI_SUBKERNEL_BEGIN("GEN_LIN_RECUR_2");
+      //#pragma omp target is_device_ptr(b5, stb5, sa, sb) device( did )
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size2 = RAJA_DIVIDE_CEILING_INT(N, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size2, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(b5, stb5, sa, sb) device( did )
+      #pragma omp parallel
+      {
+        Index_type i = 1 + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < N+1) {
+          GEN_LIN_RECUR_BODY2;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("GEN_LIN_RECUR_2");
+
+    }
+    stopTimer();
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    const size_t grid_size = RAJA_DIVIDE_CEILING_INT(N, threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      RP_CALI_SUBKERNEL_BEGIN("GEN_LIN_RECUR_1");
       #pragma omp target is_device_ptr(b5, stb5, sa, sb) device( did )
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type k = 0; k < N; ++k ) {
         GEN_LIN_RECUR_BODY1;
       }
@@ -50,7 +93,7 @@ void GEN_LIN_RECUR::runOpenMPTargetVariant(VariantID vid)
 
       RP_CALI_SUBKERNEL_BEGIN("GEN_LIN_RECUR_2");
       #pragma omp target is_device_ptr(b5, stb5, sa, sb) device( did )
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = 1; i < N+1; ++i ) {
         GEN_LIN_RECUR_BODY2;
       }
@@ -89,7 +132,7 @@ void GEN_LIN_RECUR::runOpenMPTargetVariant(VariantID vid)
   }
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(GEN_LIN_RECUR, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(GEN_LIN_RECUR, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace lcals
 } // end namespace rajaperf

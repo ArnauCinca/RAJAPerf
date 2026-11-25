@@ -47,8 +47,46 @@ void REDUCE3_INT::runOpenMPTargetVariant(VariantID vid)
       Int_type vmin = m_vmin_init;
       Int_type vmax = m_vmax_init;
 
+      //#pragma omp target is_device_ptr(vec) device( did ) map(tofrom:vsum, vmin, vmax)
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static,1) \
+      //                         reduction(+:vsum) \
+      //                         reduction(min:vmin) \
+      //                         reduction(max:vmax)
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              reduction(+:vsum) reduction(min:vmin) reduction(max:vmax) is_device_ptr(vec) device( did ) map(tofrom:vsum, vmin, vmax)
+      #pragma omp parallel reduction(+:vsum) reduction(min:vmin) reduction(max:vmax)
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          REDUCE3_INT_BODY;
+        }
+      }
+
+      m_vsum = vsum;
+      m_vmin = vmin;
+      m_vmax = vmax;
+      RP_CALI_SUBKERNEL_END("REDUCE3_INT_1");
+
+    }
+    stopTimer();
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      RP_CALI_SUBKERNEL_BEGIN("REDUCE3_INT_1");
+      Int_type vsum = m_vsum_init;
+      Int_type vmin = m_vmin_init;
+      Int_type vmax = m_vmax_init;
+
       #pragma omp target is_device_ptr(vec) device( did ) map(tofrom:vsum, vmin, vmax)
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static,1) \
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static,1) \
                                reduction(+:vsum) \
                                reduction(min:vmin) \
                                reduction(max:vmax)
@@ -103,7 +141,7 @@ void REDUCE3_INT::runOpenMPTargetVariant(VariantID vid)
   }
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(REDUCE3_INT, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(REDUCE3_INT, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace basic
 } // end namespace rajaperf

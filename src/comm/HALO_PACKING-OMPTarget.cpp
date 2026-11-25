@@ -47,8 +47,81 @@ void HALO_PACKING::runOpenMPTargetVariant(VariantID vid)
         for (Index_type v = 0; v < num_vars; ++v) {
           Real_ptr var = vars[v];
           RP_CALI_SUBKERNEL_BEGIN("HALO_PACKING_pack_k");
+          //#pragma omp target is_device_ptr(buffer, list, var) device( did )
+          //#pragma omp teams distribute parallel for schedule(static, 1)
+          const size_t grid_size = RAJA_DIVIDE_CEILING_INT(len, threads_per_team);
+          #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+                  thread_limit(dims(3): threads_per_team, 1, 1) \
+                  is_device_ptr(buffer, list, var) device( did )
+          #pragma omp parallel
+          {
+            Index_type i = omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+            if (i < len) {
+              HALO_PACK_BODY;
+            }
+          }
+          RP_CALI_SUBKERNEL_END("HALO_PACKING_pack_k");
+          buffer += len;
+        }
+
+        if (separate_buffers) {
+          omp_target_memcpy(send_buffers[l], pack_buffers[l],
+                            len*num_vars*sizeof(Real_type),
+                            0, 0, did, hid);
+        }
+      }
+
+      for (Index_type l = 0; l < num_neighbors; ++l) {
+        Real_ptr buffer = unpack_buffers[l];
+        Int_ptr list = unpack_index_lists[l];
+        Index_type len = unpack_index_list_lengths[l];
+        if (separate_buffers) {
+          omp_target_memcpy(unpack_buffers[l], recv_buffers[l],
+                            len*num_vars*sizeof(Real_type),
+                            0, 0, hid, did);
+        }
+
+        for (Index_type v = 0; v < num_vars; ++v) {
+          Real_ptr var = vars[v];
+          RP_CALI_SUBKERNEL_BEGIN("HALO_PACKING_unpack_k");
+          //#pragma omp target is_device_ptr(buffer, list, var) device( did )
+          //#pragma omp teams distribute parallel for schedule(static, 1)
+          const size_t grid_size2 = RAJA_DIVIDE_CEILING_INT(len, threads_per_team);
+          #pragma omp target teams num_teams(dims(3): grid_size2, 1, 1) \
+                  thread_limit(dims(3): threads_per_team, 1, 1) \
+                  is_device_ptr(buffer, list, var) device( did )
+          #pragma omp parallel
+          {
+            Index_type i = omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+            if (i < len) {
+              HALO_UNPACK_BODY;
+            }
+          }
+          RP_CALI_SUBKERNEL_END("HALO_PACKING_unpack_k");
+          buffer += len;
+        }
+      }
+
+    }
+    stopTimer();
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      for (Index_type l = 0; l < num_neighbors; ++l) {
+        Real_ptr buffer = pack_buffers[l];
+        Int_ptr list = pack_index_lists[l];
+        Index_type len = pack_index_list_lengths[l];
+        for (Index_type v = 0; v < num_vars; ++v) {
+          Real_ptr var = vars[v];
+          RP_CALI_SUBKERNEL_BEGIN("HALO_PACKING_pack_k");
+          const size_t grid_size = RAJA_DIVIDE_CEILING_INT(len, threads_per_team);
           #pragma omp target is_device_ptr(buffer, list, var) device( did )
-          #pragma omp teams distribute parallel for schedule(static, 1)
+          #pragma omp teams distribute parallel for num_teams(grid_size) \
+                  thread_limit(threads_per_team) schedule(static, 1)
           for (Index_type i = 0; i < len; i++) {
             HALO_PACK_BODY;
           }
@@ -76,8 +149,10 @@ void HALO_PACKING::runOpenMPTargetVariant(VariantID vid)
         for (Index_type v = 0; v < num_vars; ++v) {
           Real_ptr var = vars[v];
           RP_CALI_SUBKERNEL_BEGIN("HALO_PACKING_unpack_k");
+          const size_t grid_size = RAJA_DIVIDE_CEILING_INT(len, threads_per_team);
           #pragma omp target is_device_ptr(buffer, list, var) device( did )
-          #pragma omp teams distribute parallel for schedule(static, 1)
+          #pragma omp teams distribute parallel for num_teams(grid_size) \
+                  thread_limit(threads_per_team) schedule(static, 1)
           for (Index_type i = 0; i < len; i++) {
             HALO_UNPACK_BODY;
           }
@@ -151,7 +226,7 @@ void HALO_PACKING::runOpenMPTargetVariant(VariantID vid)
   }
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(HALO_PACKING, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(HALO_PACKING, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace comm
 } // end namespace rajaperf

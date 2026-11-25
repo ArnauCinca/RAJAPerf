@@ -47,8 +47,43 @@ void HISTOGRAM::runOpenMPTargetVariant(VariantID vid)
       RP_CALI_SUBKERNEL_BEGIN("HISTOGRAM_1");
       initOpenMPDeviceData(counts, counts_init, num_bins);
 
+      //#pragma omp target is_device_ptr(counts, bins)
+      //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(counts, bins)
+      #pragma omp parallel
+      {
+        Index_type i = ibegin + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (i < iend) {
+          HISTOGRAM_BODY(RAJAPERF_ATOMIC_ADD_OMP);
+        }
+      }
+
+      getOpenMPDeviceData(counts_final, counts, num_bins);
+      RP_CALI_SUBKERNEL_END("HISTOGRAM_1");
+
+    }
+    stopTimer();
+
+    HISTOGRAM_TEARDOWN_COUNTS;
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    HISTOGRAM_SETUP_COUNTS;
+
+    const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      RP_CALI_SUBKERNEL_BEGIN("HISTOGRAM_1");
+      initOpenMPDeviceData(counts, counts_init, num_bins);
+
       #pragma omp target is_device_ptr(counts, bins)
-      #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) schedule(static, 1)
       for (Index_type i = ibegin; i < iend; ++i ) {
         HISTOGRAM_BODY(RAJAPERF_ATOMIC_ADD_OMP);
       }
@@ -69,7 +104,7 @@ void HISTOGRAM::runOpenMPTargetVariant(VariantID vid)
 
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(HISTOGRAM, OpenMPTarget, Base_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(HISTOGRAM, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor)
 
 } // end namespace algorithm
 } // end namespace rajaperf

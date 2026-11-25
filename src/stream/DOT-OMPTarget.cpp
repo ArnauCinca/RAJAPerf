@@ -46,8 +46,47 @@ void DOT::runOpenMPTargetVariant(VariantID vid)
         RP_CALI_SUBKERNEL_BEGIN("DOT_1");
         Real_type dot = m_dot_init;
 
+        //#pragma omp target is_device_ptr(a, b) device( did ) map(tofrom:dot)
+        //#pragma omp teams distribute parallel for reduction(+:dot) \
+        //        thread_limit(threads_per_team) schedule(static, 1)
+        //#pragma omp target teams distribute parallel for reduction(+:dot) \
+        //        thread_limit(threads_per_team) is_device_ptr(a, b) device( did ) map(tofrom:dot)
+        //for (Index_type i = ibegin; i < iend; ++i ) {
+        //  DOT_BODY;
+        //}
+
+        const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend, threads_per_team);
+        #pragma omp target teams num_teams(dims(3): grid_size, 1, 1) thread_limit(dims(3): threads_per_team, 1, 1) \
+                is_device_ptr(a, b) device( did ) map(tofrom:dot) reduction(+:dot)
+        #pragma omp parallel reduction(+:dot)
+        {
+          Index_type i = omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+          if (i < iend)
+            DOT_BODY;
+        }
+
+        m_dot += dot;
+        RP_CALI_SUBKERNEL_END("DOT_1");
+
+      }
+      stopTimer();
+
+      break;
+    }
+
+    case Base_OpenMPTarget_ParallelFor : {
+
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
+
+      startTimer();
+      // Loop counter increment uses macro to quiet C++20 compiler warning
+      for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+        RP_CALI_SUBKERNEL_BEGIN("DOT_1");
+        Real_type dot = m_dot_init;
+
         #pragma omp target is_device_ptr(a, b) device( did ) map(tofrom:dot)
-        #pragma omp teams distribute parallel for reduction(+:dot) \
+        #pragma omp teams distribute parallel for num_teams(grid_size) reduction(+:dot) \
                 thread_limit(threads_per_team) schedule(static, 1)
         for (Index_type i = ibegin; i < iend; ++i ) {
           DOT_BODY;
@@ -99,7 +138,7 @@ void DOT::runOpenMPTargetVariant(VariantID vid)
 
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(DOT, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(DOT, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace stream
 } // end namespace rajaperf

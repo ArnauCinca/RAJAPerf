@@ -23,9 +23,9 @@ namespace comm
 {
 
   //
-  // Define threads per team for target execution (unused)
+  // Define threads per team for target execution
   //
-//const size_t threads_per_team = 256;
+  const size_t threads_per_team = 256;
 
 #define HALO_EXCHANGE_FUSED_MANUAL_FUSER_SETUP_OMP_TARGET \
   void** pack_ptrs; \
@@ -105,8 +105,141 @@ void HALO_EXCHANGE_FUSED::runOpenMPTargetVariantDirect(VariantID vid)
       HALO_EXCHANGE_FUSED_MANUAL_FUSER_COPY_PACK_OMP_TARGET;
       Index_type pack_len_ave = (pack_len_sum + pack_index-1) / pack_index;
       RP_CALI_SUBKERNEL_BEGIN("HALO_EXCHANGE_FUSED_pack");
+      //#pragma omp target is_device_ptr(pack_buffer_ptrs, pack_list_ptrs, pack_var_ptrs, pack_len_ptrs) device( did )
+      //#pragma omp teams distribute parallel for collapse(2) schedule(static, 1)
+      const size_t pack_grid_size = RAJA_DIVIDE_CEILING_INT(pack_len_ave, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): pack_grid_size, pack_index, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(pack_buffer_ptrs, pack_list_ptrs, pack_var_ptrs, pack_len_ptrs) device( did )
+      #pragma omp parallel
+      {
+        Index_type j = omp_get_team_num_dim(1);
+        Index_type ii = omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (j < pack_index) {
+          Real_ptr   buffer = pack_buffer_ptrs[j];
+          Int_ptr    list   = pack_list_ptrs[j];
+          Real_ptr   var    = pack_var_ptrs[j];
+          Index_type len    = pack_len_ptrs[j];
+
+          for (Index_type i = ii; i < len; i += omp_get_num_threads_dim(0) * omp_get_num_teams_dim(0)) {
+            HALO_PACK_BODY;
+          }
+        }
+      }
+      RP_CALI_SUBKERNEL_END("HALO_EXCHANGE_FUSED_pack");
+      if (separate_buffers) {
+        for (Index_type l = 0; l < num_neighbors; ++l) {
+          Index_type len = pack_index_list_lengths[l];
+          omp_target_memcpy(send_buffers[l], pack_buffers[l],
+                            len*num_vars*sizeof(Real_type),
+                            0, 0, did, hid);
+        }
+      }
+      for (Index_type l = 0; l < num_neighbors; ++l) {
+        Index_type len = pack_index_list_lengths[l];
+        MPI_Isend(send_buffers[l], len*num_vars, Real_MPI_type,
+            mpi_ranks[l], send_tags[l], MPI_COMM_WORLD, &pack_mpi_requests[l]);
+      }
+
+      MPI_Waitall(num_neighbors, unpack_mpi_requests.data(), MPI_STATUSES_IGNORE);
+
+      Index_type unpack_index = 0;
+      Index_type unpack_len_sum = 0;
+
+      for (Index_type l = 0; l < num_neighbors; ++l) {
+        Real_ptr buffer = unpack_buffers[l];
+        Int_ptr list = unpack_index_lists[l];
+        Index_type len = unpack_index_list_lengths[l];
+        if (separate_buffers) {
+          omp_target_memcpy(unpack_buffers[l], recv_buffers[l],
+                            len*num_vars*sizeof(Real_type),
+                            0, 0, hid, did);
+        }
+
+        for (Index_type v = 0; v < num_vars; ++v) {
+          Real_ptr var = vars[v];
+          h_unpack_buffer_ptrs[unpack_index] = buffer;
+          h_unpack_list_ptrs[unpack_index] = list;
+          h_unpack_var_ptrs[unpack_index] = var;
+          h_unpack_len_ptrs[unpack_index] = len;
+          unpack_len_sum += len;
+          unpack_index += 1;
+          buffer += len;
+        }
+      }
+      HALO_EXCHANGE_FUSED_MANUAL_FUSER_COPY_UNPACK_OMP_TARGET;
+      Index_type unpack_len_ave = (unpack_len_sum + unpack_index-1) / unpack_index;
+      RP_CALI_SUBKERNEL_BEGIN("HALO_EXCHANGE_FUSED_unpack");
+      //#pragma omp target is_device_ptr(unpack_buffer_ptrs, unpack_list_ptrs, unpack_var_ptrs, unpack_len_ptrs) device( did )
+      //#pragma omp teams distribute parallel for collapse(2) schedule(static, 1)
+      const size_t unpack_grid_size = RAJA_DIVIDE_CEILING_INT(unpack_len_ave, threads_per_team);
+      #pragma omp target teams num_teams(dims(3): unpack_grid_size, unpack_index, 1) \
+              thread_limit(dims(3): threads_per_team, 1, 1) \
+              is_device_ptr(unpack_buffer_ptrs, unpack_list_ptrs, unpack_var_ptrs, unpack_len_ptrs) device( did )
+      #pragma omp parallel
+      {
+        Index_type j = omp_get_team_num_dim(1);
+        Index_type ii = omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        if (j < unpack_index) {
+          Real_ptr   buffer = unpack_buffer_ptrs[j];
+          Int_ptr    list   = unpack_list_ptrs[j];
+          Real_ptr   var    = unpack_var_ptrs[j];
+          Index_type len    = unpack_len_ptrs[j];
+
+          for (Index_type i = ii; i < len; i += omp_get_num_threads_dim(0) * omp_get_num_teams_dim(0)) {
+            HALO_UNPACK_BODY;
+          }
+        }
+      }
+      RP_CALI_SUBKERNEL_END("HALO_EXCHANGE_FUSED_unpack");
+
+      MPI_Waitall(num_neighbors, pack_mpi_requests.data(), MPI_STATUSES_IGNORE);
+
+    }
+    stopTimer();
+
+    HALO_EXCHANGE_FUSED_MANUAL_FUSER_TEARDOWN_OMP_TARGET;
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    HALO_EXCHANGE_FUSED_MANUAL_FUSER_SETUP_OMP_TARGET;
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
+      for (Index_type l = 0; l < num_neighbors; ++l) {
+        Index_type len = unpack_index_list_lengths[l];
+        MPI_Irecv(recv_buffers[l], len*num_vars, Real_MPI_type,
+            mpi_ranks[l], recv_tags[l], MPI_COMM_WORLD, &unpack_mpi_requests[l]);
+      }
+
+      Index_type pack_index = 0;
+      Index_type pack_len_sum = 0;
+
+      for (Index_type l = 0; l < num_neighbors; ++l) {
+        Real_ptr buffer = pack_buffers[l];
+        Int_ptr list = pack_index_lists[l];
+        Index_type len = pack_index_list_lengths[l];
+        for (Index_type v = 0; v < num_vars; ++v) {
+          Real_ptr var = vars[v];
+          h_pack_buffer_ptrs[pack_index] = buffer;
+          h_pack_list_ptrs[pack_index] = list;
+          h_pack_var_ptrs[pack_index] = var;
+          h_pack_len_ptrs[pack_index] = len;
+          pack_len_sum += len;
+          pack_index += 1;
+          buffer += len;
+        }
+      }
+      HALO_EXCHANGE_FUSED_MANUAL_FUSER_COPY_PACK_OMP_TARGET;
+      Index_type pack_len_ave = (pack_len_sum + pack_index-1) / pack_index;
+      RP_CALI_SUBKERNEL_BEGIN("HALO_EXCHANGE_FUSED_pack");
+      const size_t pack_grid_size =
+          RAJA_DIVIDE_CEILING_INT(static_cast<size_t>(pack_index) * pack_len_ave, threads_per_team);
       #pragma omp target is_device_ptr(pack_buffer_ptrs, pack_list_ptrs, pack_var_ptrs, pack_len_ptrs) device( did )
-      #pragma omp teams distribute parallel for collapse(2) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(pack_grid_size) \
+              thread_limit(threads_per_team) collapse(2) schedule(static, 1)
       for (Index_type j = 0; j < pack_index; j++) {
         for (Index_type ii = 0; ii < pack_len_ave; ii++) {
 
@@ -164,8 +297,11 @@ void HALO_EXCHANGE_FUSED::runOpenMPTargetVariantDirect(VariantID vid)
       HALO_EXCHANGE_FUSED_MANUAL_FUSER_COPY_UNPACK_OMP_TARGET;
       Index_type unpack_len_ave = (unpack_len_sum + unpack_index-1) / unpack_index;
       RP_CALI_SUBKERNEL_BEGIN("HALO_EXCHANGE_FUSED_unpack");
+      const size_t unpack_grid_size =
+          RAJA_DIVIDE_CEILING_INT(static_cast<size_t>(unpack_index) * unpack_len_ave, threads_per_team);
       #pragma omp target is_device_ptr(unpack_buffer_ptrs, unpack_list_ptrs, unpack_var_ptrs, unpack_len_ptrs) device( did )
-      #pragma omp teams distribute parallel for collapse(2) schedule(static, 1)
+      #pragma omp teams distribute parallel for num_teams(unpack_grid_size) \
+              thread_limit(threads_per_team) collapse(2) schedule(static, 1)
       for (Index_type j = 0; j < unpack_index; j++) {
         for (Index_type ii = 0; ii < unpack_len_ave; ii++) {
 
@@ -313,9 +449,9 @@ void HALO_EXCHANGE_FUSED::runOpenMPTargetVariantWorkGroup(VariantID vid)
 void HALO_EXCHANGE_FUSED::defineOpenMPTargetVariantTunings()
 {
 
-  for (VariantID vid : {Base_OpenMPTarget, RAJA_OpenMPTarget}) {
+  for (VariantID vid : {Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget}) {
 
-    if (vid == Base_OpenMPTarget) {
+    if (vid == Base_OpenMPTarget || vid == Base_OpenMPTarget_ParallelFor) {
 
       addVariantTuning<&HALO_EXCHANGE_FUSED::runOpenMPTargetVariantDirect>(
           vid, "direct");

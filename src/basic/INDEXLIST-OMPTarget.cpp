@@ -41,7 +41,11 @@ void INDEXLIST::runOpenMPTargetVariant(VariantID vid)
 
   switch ( vid ) {
 
+    // Both variants require a worksharing loop for OpenMP scan.
+    case Base_OpenMPTarget_ParallelFor :
     case Base_OpenMPTarget : {
+
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
 
       startTimer();
       // Loop counter increment uses macro to quiet C++20 compiler warning
@@ -49,9 +53,13 @@ void INDEXLIST::runOpenMPTargetVariant(VariantID vid)
 
         RP_CALI_SUBKERNEL_BEGIN("INDEXLIST_1");
         Index_type count = 0;
-        #pragma omp target is_device_ptr(x, list) device( did )
-        #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) \
-                                                  reduction(inscan, +:count)
+        //#pragma omp target is_device_ptr(x, list) device( did )
+        //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) \
+        //                                          reduction(inscan, +:count)
+        // OpenMP scan requires an associated worksharing loop.
+        #pragma omp target teams distribute parallel for num_teams(grid_size) thread_limit(threads_per_team) \
+                                                  reduction(inscan, +:count) \
+                                                  is_device_ptr(x, list) device( did )
         for (Index_type i = ibegin; i < iend; ++i ) {
           Index_type inc = 0;
           if (INDEXLIST_CONDITIONAL) {
@@ -85,7 +93,7 @@ void INDEXLIST::runOpenMPTargetVariant(VariantID vid)
 
 #if defined(RAJA_ENABLE_OPENMP) && defined(RUN_OPENMP) \
  && _OPENMP >= 201811 && defined(RAJA_PERFSUITE_ENABLE_OPENMP5_SCAN)
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(INDEXLIST, OpenMPTarget, Base_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(INDEXLIST, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor)
 #else
 void INDEXLIST::defineOpenMPTargetVariantTunings() {}
 #endif

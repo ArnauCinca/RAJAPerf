@@ -53,6 +53,7 @@
 namespace rajaperf {
 
 using namespace std;
+using std::max;
 
 #if defined(RAJA_PERFSUITE_USE_CALIPER)
 vector<string> split(const string str, const string regex_str)

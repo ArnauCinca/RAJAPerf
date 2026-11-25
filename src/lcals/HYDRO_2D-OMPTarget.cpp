@@ -22,6 +22,11 @@ namespace rajaperf
 namespace lcals
 {
 
+  const size_t threads_per_team = 256;
+  // Match the CUDA block shape, with the innermost index along x.
+  const size_t threads_per_team_x = 32;
+  const size_t threads_per_team_y = threads_per_team / threads_per_team_x;
+
 void HYDRO_2D::runOpenMPTargetVariant(VariantID vid)
 {
   const Index_type run_reps = getRunReps();
@@ -38,10 +43,80 @@ void HYDRO_2D::runOpenMPTargetVariant(VariantID vid)
     // Loop counter increment uses macro to quiet C++20 compiler warning
     for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
 
+      //#pragma omp target is_device_ptr(zadat, zbdat, zpdat, \
+      //                                 zqdat, zrdat, zmdat) device( did )
+      RP_CALI_SUBKERNEL_BEGIN("HYDRO_2D_1");
+      //#pragma omp teams distribute parallel for schedule(static, 1) collapse(2)
+      const size_t grid_size_x = RAJA_DIVIDE_CEILING_INT(jend - jbeg, threads_per_team_x);
+      const size_t grid_size_y = RAJA_DIVIDE_CEILING_INT(kend - kbeg, threads_per_team_y);
+      #pragma omp target teams num_teams(dims(3): grid_size_x, grid_size_y, 1) \
+              thread_limit(dims(3): threads_per_team_x, threads_per_team_y, 1) \
+              is_device_ptr(zadat, zbdat, zpdat, zqdat, zrdat, zmdat) device( did )
+      #pragma omp parallel
+      {
+        Index_type j = jbeg + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        Index_type k = kbeg + omp_get_team_num_dim(1) * omp_get_num_threads_dim(1) + omp_get_thread_num_dim(1);
+        if (j < jend && k < kend) {
+          HYDRO_2D_BODY1;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("HYDRO_2D_1");
+
+      //#pragma omp target is_device_ptr(zudat, zvdat, zadat, \
+      //                                 zbdat, zzdat, zrdat) device( did )
+      RP_CALI_SUBKERNEL_BEGIN("HYDRO_2D_2");
+      //#pragma omp teams distribute parallel for schedule(static, 1) collapse(2)
+      const size_t grid_size2_x = RAJA_DIVIDE_CEILING_INT(jend - jbeg, threads_per_team_x);
+      const size_t grid_size2_y = RAJA_DIVIDE_CEILING_INT(kend - kbeg, threads_per_team_y);
+      #pragma omp target teams num_teams(dims(3): grid_size2_x, grid_size2_y, 1) \
+              thread_limit(dims(3): threads_per_team_x, threads_per_team_y, 1) \
+              is_device_ptr(zudat, zvdat, zadat, zbdat, zzdat, zrdat) device( did )
+      #pragma omp parallel
+      {
+        Index_type j = jbeg + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        Index_type k = kbeg + omp_get_team_num_dim(1) * omp_get_num_threads_dim(1) + omp_get_thread_num_dim(1);
+        if (j < jend && k < kend) {
+          HYDRO_2D_BODY2;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("HYDRO_2D_2");
+
+      //#pragma omp target is_device_ptr(zroutdat, zzoutdat, \
+      //                                 zrdat, zudat, zzdat, zvdat) device( did )
+      RP_CALI_SUBKERNEL_BEGIN("HYDRO_2D_3");
+      //#pragma omp teams distribute parallel for schedule(static, 1) collapse(2)
+      const size_t grid_size3_x = RAJA_DIVIDE_CEILING_INT(jend - jbeg, threads_per_team_x);
+      const size_t grid_size3_y = RAJA_DIVIDE_CEILING_INT(kend - kbeg, threads_per_team_y);
+      #pragma omp target teams num_teams(dims(3): grid_size3_x, grid_size3_y, 1) \
+              thread_limit(dims(3): threads_per_team_x, threads_per_team_y, 1) \
+              is_device_ptr(zroutdat, zzoutdat, zrdat, zudat, zzdat, zvdat) device( did )
+      #pragma omp parallel
+      {
+        Index_type j = jbeg + omp_get_team_num_dim(0) * omp_get_num_threads_dim(0) + omp_get_thread_num_dim(0);
+        Index_type k = kbeg + omp_get_team_num_dim(1) * omp_get_num_threads_dim(1) + omp_get_thread_num_dim(1);
+        if (j < jend && k < kend) {
+          HYDRO_2D_BODY3;
+        }
+      }
+      RP_CALI_SUBKERNEL_END("HYDRO_2D_3");
+
+    }
+    stopTimer();
+
+  } else if ( vid == Base_OpenMPTarget_ParallelFor ) {
+
+    const size_t grid_size =
+        RAJA_DIVIDE_CEILING_INT(static_cast<size_t>(kend - kbeg) * (jend - jbeg), threads_per_team);
+
+    startTimer();
+    // Loop counter increment uses macro to quiet C++20 compiler warning
+    for (RepIndex_type irep = 0; irep < run_reps; RP_REPCOUNTINC(irep)) {
+
       #pragma omp target is_device_ptr(zadat, zbdat, zpdat, \
                                        zqdat, zrdat, zmdat) device( did )
       RP_CALI_SUBKERNEL_BEGIN("HYDRO_2D_1");
-      #pragma omp teams distribute parallel for schedule(static, 1) collapse(2)
+      #pragma omp teams distribute parallel for num_teams(grid_size) \
+              thread_limit(threads_per_team) schedule(static, 1) collapse(2)
       for (Index_type k = kbeg; k < kend; ++k ) {
         for (Index_type j = jbeg; j < jend; ++j ) {
           HYDRO_2D_BODY1;
@@ -52,7 +127,8 @@ void HYDRO_2D::runOpenMPTargetVariant(VariantID vid)
       #pragma omp target is_device_ptr(zudat, zvdat, zadat, \
                                        zbdat, zzdat, zrdat) device( did )
       RP_CALI_SUBKERNEL_BEGIN("HYDRO_2D_2");
-      #pragma omp teams distribute parallel for schedule(static, 1) collapse(2)
+      #pragma omp teams distribute parallel for num_teams(grid_size) \
+              thread_limit(threads_per_team) schedule(static, 1) collapse(2)
       for (Index_type k = kbeg; k < kend; ++k ) {
         for (Index_type j = jbeg; j < jend; ++j ) {
           HYDRO_2D_BODY2;
@@ -63,7 +139,8 @@ void HYDRO_2D::runOpenMPTargetVariant(VariantID vid)
       #pragma omp target is_device_ptr(zroutdat, zzoutdat, \
                                        zrdat, zudat, zzdat, zvdat) device( did )
       RP_CALI_SUBKERNEL_BEGIN("HYDRO_2D_3");
-      #pragma omp teams distribute parallel for schedule(static, 1) collapse(2)
+      #pragma omp teams distribute parallel for num_teams(grid_size) \
+              thread_limit(threads_per_team) schedule(static, 1) collapse(2)
       for (Index_type k = kbeg; k < kend; ++k ) {
         for (Index_type j = jbeg; j < jend; ++j ) {
           HYDRO_2D_BODY3;
@@ -130,7 +207,7 @@ void HYDRO_2D::runOpenMPTargetVariant(VariantID vid)
   }
 }
 
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(HYDRO_2D, OpenMPTarget, Base_OpenMPTarget, RAJA_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(HYDRO_2D, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor, RAJA_OpenMPTarget)
 
 } // end namespace lcals
 } // end namespace rajaperf

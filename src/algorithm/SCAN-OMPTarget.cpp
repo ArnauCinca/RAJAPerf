@@ -42,7 +42,11 @@ void SCAN::runOpenMPTargetVariant(VariantID vid)
 
   switch ( vid ) {
 
+    // Both variants require a worksharing loop for OpenMP scan.
+    case Base_OpenMPTarget_ParallelFor :
     case Base_OpenMPTarget : {
+
+      const size_t grid_size = RAJA_DIVIDE_CEILING_INT(iend - ibegin, threads_per_team);
 
       startTimer();
       // Loop counter increment uses macro to quiet C++20 compiler warning
@@ -51,9 +55,13 @@ void SCAN::runOpenMPTargetVariant(VariantID vid)
         RP_CALI_SUBKERNEL_BEGIN("SCAN_1");
         SCAN_PROLOGUE;
 
-        #pragma omp target is_device_ptr(x,y) device( did )
-        #pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) \
-                                                  reduction(inscan, +:scan_var)
+        //#pragma omp target is_device_ptr(x,y) device( did )
+        //#pragma omp teams distribute parallel for thread_limit(threads_per_team) schedule(static, 1) \
+        //                                          reduction(inscan, +:scan_var)
+        // OpenMP scan requires an associated worksharing loop.
+        #pragma omp target teams distribute parallel for num_teams(grid_size) \
+                thread_limit(threads_per_team) reduction(inscan, +:scan_var) \
+                is_device_ptr(x,y) device( did )
         for (Index_type i = ibegin; i < iend; ++i ) {
           y[i] = scan_var;
           #pragma omp scan exclusive(scan_var)
@@ -75,7 +83,7 @@ void SCAN::runOpenMPTargetVariant(VariantID vid)
 }
 
 #if _OPENMP >= 201811 && defined(RAJA_PERFSUITE_ENABLE_OPENMP5_SCAN)
-RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(SCAN, OpenMPTarget, Base_OpenMPTarget)
+RAJAPERF_DEFAULT_TUNING_DEFINE_BOILERPLATE(SCAN, OpenMPTarget, Base_OpenMPTarget, Base_OpenMPTarget_ParallelFor)
 #else
 void SCAN::defineOpenMPTargetVariantTunings() {}
 #endif

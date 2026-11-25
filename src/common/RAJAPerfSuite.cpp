@@ -349,6 +349,7 @@ static const std::string VariantNames [] =
   std::string("RAJA_OpenMP"),
 
   std::string("Base_OpenMPTarget"),
+  std::string("Base_OpenMPTarget_ParallelFor"),
   std::string("RAJA_OpenMPTarget"),
 
   std::string("Base_CUDA"),
@@ -608,6 +609,7 @@ bool isVariantAvailable(VariantID vid)
 
 #if defined(RAJA_ENABLE_TARGET_OPENMP)
   if ( vid == Base_OpenMPTarget ||
+       vid == Base_OpenMPTarget_ParallelFor ||
        vid == RAJA_OpenMPTarget ) {
     ret_val = true;
   }
@@ -676,6 +678,7 @@ bool isVariantGPU(VariantID vid)
 
 #if defined(RAJA_ENABLE_TARGET_OPENMP)
   if ( vid == Base_OpenMPTarget ||
+       vid == Base_OpenMPTarget_ParallelFor ||
        vid == RAJA_OpenMPTarget ) {
     ret_val = false;
   }

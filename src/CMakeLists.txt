@@ -297,6 +297,12 @@ install( TARGETS raja-perf-omptarget.exe
          RUNTIME DESTINATION bin
        )
 
+target_link_libraries(raja-perf-omptarget.exe
+  PRIVATE
+    omp
+    omptarget
+)
+
 else()
 blt_add_executable(
   NAME raja-perf.exe

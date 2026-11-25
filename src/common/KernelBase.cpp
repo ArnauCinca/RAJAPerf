@@ -180,6 +180,7 @@ DataSpace KernelBase::getDataSpace(VariantID vid) const
       return run_params.getOmpDataSpace();
 
     case Base_OpenMPTarget :
+    case Base_OpenMPTarget_ParallelFor :
     case RAJA_OpenMPTarget :
       return run_params.getOmpTargetDataSpace();
 
@@ -220,6 +221,7 @@ DataSpace KernelBase::getMPIDataSpace(VariantID vid) const
       return run_params.getOmpMPIDataSpace();
 
     case Base_OpenMPTarget :
+    case Base_OpenMPTarget_ParallelFor :
     case RAJA_OpenMPTarget :
       return run_params.getOmpTargetMPIDataSpace();
 
@@ -260,6 +262,7 @@ DataSpace KernelBase::getReductionDataSpace(VariantID vid) const
       return run_params.getOmpReductionDataSpace();
 
     case Base_OpenMPTarget :
+    case Base_OpenMPTarget_ParallelFor :
     case RAJA_OpenMPTarget :
       return run_params.getOmpTargetReductionDataSpace();
 
